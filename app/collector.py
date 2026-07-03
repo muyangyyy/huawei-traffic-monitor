@@ -63,6 +63,9 @@ class CollectorService:
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.collect_lock = threading.Lock()
+        self.failure_counts: dict[str, int] = {}
+        self.down_interfaces: set[tuple[str, int]] = set()
+        self.high_traffic_interfaces: set[tuple[str, int]] = set()
 
     def update_config(self, config: MonitorConfig) -> None:
         self.config = config
@@ -88,16 +91,57 @@ class CollectorService:
                 try:
                     samples = collect_device(device, config)
                     self.db.save_samples(samples)
+                    self._record_device_recovery(device)
+                    self._record_interface_states(device, samples)
+                    self._record_traffic_alerts(device)
                     self.db.record_device_status(device.id, "online")
-                    if samples:
-                        self.db.add_event("info", f"{device.name} 采集正常，接口数 {len(samples)}", device.id)
                 except Exception as exc:
-                    self.db.record_device_status(device.id, "offline")
-                    self.db.add_event("error", f"{device.name} 采集失败：{exc}", device.id)
+                    self._record_device_failure(device, exc)
             now = datetime.now(UTC)
             for period in ("day", "week", "month", "year"):
                 self.db.rebuild_aggregates(period, now)
             self.db.enforce_retention(config.retention_days)
+
+    def _record_device_failure(self, device: DeviceConfig, exc: Exception) -> None:
+        count = self.failure_counts.get(device.id, 0) + 1
+        self.failure_counts[device.id] = count
+        status = "offline" if count >= 3 else "checking"
+        self.db.record_device_status(device.id, status)
+        if count == 1 or count % 3 == 0:
+            self.db.add_event("error", f"{device.name} 采集失败，连续 {count} 次：{exc}", device.id)
+
+    def _record_device_recovery(self, device: DeviceConfig) -> None:
+        count = self.failure_counts.pop(device.id, 0)
+        if count:
+            self.db.add_event("warn", f"{device.name} 已恢复采集，之前连续失败 {count} 次", device.id)
+
+    def _record_interface_states(self, device: DeviceConfig, samples: list[InterfaceSample]) -> None:
+        for sample in samples:
+            key = (device.id, sample.if_index)
+            label = interface_label(sample)
+            if sample.oper_status != "up":
+                if key not in self.down_interfaces:
+                    self.down_interfaces.add(key)
+                    self.db.add_event("warn", f"{device.name} 接口 {label} 状态为 {sample.oper_status}", device.id)
+            elif key in self.down_interfaces:
+                self.down_interfaces.remove(key)
+                self.db.add_event("warn", f"{device.name} 接口 {label} 已恢复 Up", device.id)
+
+    def _record_traffic_alerts(self, device: DeviceConfig) -> None:
+        for row in self.db.latest_interface_rates(device.id):
+            speed_mbps = int_or_none(row.get("if_speed_mbps"))
+            if not speed_mbps or row.get("sample_status") != "ok":
+                continue
+            in_bps = float(row.get("in_bps") or 0)
+            out_bps = float(row.get("out_bps") or 0)
+            utilization = max(in_bps, out_bps) / (speed_mbps * 1_000_000)
+            key = (device.id, int(row["if_index"]))
+            label = str(row.get("if_name") or f"ifIndex-{row['if_index']}")
+            if utilization >= 0.8 and key not in self.high_traffic_interfaces:
+                self.high_traffic_interfaces.add(key)
+                self.db.add_event("warn", f"{device.name} 接口 {label} 利用率超过 80%", device.id, int(row["interface_id"]))
+            elif utilization < 0.6 and key in self.high_traffic_interfaces:
+                self.high_traffic_interfaces.remove(key)
 
     def _run(self) -> None:
         while not self.stop_event.is_set():
@@ -121,6 +165,12 @@ def collect_device(device: DeviceConfig, config: MonitorConfig) -> list[Interfac
         retries=config.snmp_retries,
     )
     return snmp_interface_samples(device, client)
+
+
+def interface_label(sample: InterfaceSample) -> str:
+    if sample.if_alias:
+        return f"#{sample.if_index} {sample.if_name} / {sample.if_alias}"
+    return f"#{sample.if_index} {sample.if_name}"
 
 
 def discover_device_interfaces(device: DeviceConfig, config: MonitorConfig, allow_mock: bool = False) -> list[InterfaceSample]:

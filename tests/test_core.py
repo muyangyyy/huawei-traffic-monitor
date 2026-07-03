@@ -9,7 +9,7 @@ from app.collector import IF_ALIAS, IF_NAME, IF_OPER_STATUS, snmp_custom_dual_sa
 from app.config import DEFAULT_CONFIG, DeviceConfig, load_config
 from app.snmp_v2c import decode_response, encode_message, encode_oid, parse_oid
 from app.snmp_v2c import VarBind
-from app.web import build_stats, traffic_window
+from app.web import build_stats, merge_saved_communities, safe_config_json, traffic_window
 
 
 UTC = timezone.utc
@@ -174,6 +174,24 @@ class ConfigTests(unittest.TestCase):
 
             self.assertEqual(loaded.sample_interval_seconds, 30)
 
+    def test_safe_config_hides_community(self) -> None:
+        config = {"devices": [{"id": "d1", "community": "secret"}]}
+
+        safe = safe_config_json(config)
+
+        self.assertEqual(safe["devices"][0]["community"], "")
+        self.assertTrue(safe["devices"][0]["community_set"])
+        self.assertEqual(config["devices"][0]["community"], "secret")
+
+    def test_blank_community_keeps_saved_secret(self) -> None:
+        existing = {"devices": [{"id": "d1", "community": "secret"}]}
+        incoming = {"devices": [{"id": "d1", "community": ""}, {"id": "d2", "community": ""}]}
+
+        merged = merge_saved_communities(existing, incoming)
+
+        self.assertEqual(merged["devices"][0]["community"], "secret")
+        self.assertEqual(merged["devices"][1]["community"], "public")
+
 
 class DatabaseSummaryTests(unittest.TestCase):
     def test_daily_traffic_totals_group_by_day(self) -> None:
@@ -195,6 +213,38 @@ class DatabaseSummaryTests(unittest.TestCase):
             self.assertEqual(rows[1]["day"], "2026-07-01")
             self.assertEqual(rows[1]["in_total_bytes"], 60)
             self.assertEqual(rows[1]["out_total_bytes"], 60)
+
+    def test_recent_events_can_filter_problem_severity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = MonitorDatabase(Path(tmp) / "traffic.db")
+            db.add_event("info", "normal")
+            db.add_event("warn", "warning")
+            db.add_event("error", "failure")
+
+            rows = db.recent_events(severities=("warn", "error"))
+
+            self.assertEqual([row["severity"] for row in rows], ["error", "warn"])
+
+    def test_interface_and_device_totals_for_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = MonitorDatabase(Path(tmp) / "traffic.db")
+            db.upsert_device("d1", "core", "192.0.2.1", "2c", True)
+            db.save_samples(
+                [
+                    InterfaceSample("d1", 1, "Eth1", "", "up", 1000, 100, 200, datetime(2026, 7, 1, 0, 0, tzinfo=UTC)),
+                    InterfaceSample("d1", 1, "Eth1", "", "up", 1000, 250, 500, datetime(2026, 7, 1, 0, 1, tzinfo=UTC)),
+                ]
+            )
+
+            start = datetime(2026, 7, 1, tzinfo=UTC)
+            end = datetime(2026, 7, 2, tzinfo=UTC)
+            interface_rows = db.interface_traffic_totals("d1", start, end)
+            device_rows = db.device_traffic_totals(start, end)
+
+            self.assertEqual(interface_rows[0]["in_total_bytes"], 150)
+            self.assertEqual(interface_rows[0]["out_total_bytes"], 300)
+            self.assertEqual(device_rows[0]["in_total_bytes"], 150)
+            self.assertEqual(device_rows[0]["out_total_bytes"], 300)
 
 
 class FakeSnmpClient:

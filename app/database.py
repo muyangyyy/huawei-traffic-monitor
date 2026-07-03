@@ -393,16 +393,102 @@ class MonitorDatabase:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def recent_events(self, limit: int = 20) -> list[dict]:
+    def interface_traffic_totals(self, device_id: str, start: datetime, end: datetime) -> list[dict]:
         with self.connect() as conn:
             rows = conn.execute(
                 """
+                SELECT
+                    i.id AS interface_id,
+                    i.if_index,
+                    i.if_name,
+                    i.if_alias,
+                    i.oper_status,
+                    COALESCE(SUM(r.in_delta_bytes), 0) AS in_total_bytes,
+                    COALESCE(SUM(r.out_delta_bytes), 0) AS out_total_bytes,
+                    COALESCE(MAX(r.in_bps), 0) AS in_max_bps,
+                    COALESCE(MAX(r.out_bps), 0) AS out_max_bps,
+                    COUNT(r.id) AS sample_count
+                FROM interfaces i
+                LEFT JOIN raw_interface_samples r
+                    ON r.interface_id=i.id
+                    AND r.sampled_at >= ?
+                    AND r.sampled_at <= ?
+                    AND r.sample_status='ok'
+                WHERE i.device_id=?
+                GROUP BY i.id
+                ORDER BY i.if_index
+                """,
+                (start.isoformat(), end.isoformat(), device_id),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def device_traffic_totals(self, start: datetime, end: datetime) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    d.id AS device_id,
+                    d.name,
+                    d.last_status,
+                    COALESCE(SUM(r.in_delta_bytes), 0) AS in_total_bytes,
+                    COALESCE(SUM(r.out_delta_bytes), 0) AS out_total_bytes,
+                    COUNT(r.id) AS sample_count
+                FROM devices d
+                LEFT JOIN raw_interface_samples r
+                    ON r.device_id=d.id
+                    AND r.sampled_at >= ?
+                    AND r.sampled_at <= ?
+                    AND r.sample_status='ok'
+                GROUP BY d.id
+                ORDER BY d.name
+                """,
+                (start.isoformat(), end.isoformat()),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def latest_interface_rates(self, device_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    i.id AS interface_id,
+                    i.if_index,
+                    i.if_name,
+                    i.if_alias,
+                    i.if_speed_mbps,
+                    r.in_bps,
+                    r.out_bps,
+                    r.sample_status
+                FROM interfaces i
+                JOIN raw_interface_samples r ON r.id = (
+                    SELECT MAX(id)
+                    FROM raw_interface_samples
+                    WHERE device_id=i.device_id AND interface_id=i.id
+                )
+                WHERE i.device_id=?
+                """,
+                (device_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def recent_events(self, limit: int = 20, severities: Sequence[str] | None = None) -> list[dict]:
+        with self.connect() as conn:
+            params: list[object] = []
+            where = ""
+            if severities:
+                placeholders = ",".join("?" for _ in severities)
+                where = f"WHERE severity IN ({placeholders})"
+                params.extend(severities)
+            params.append(limit)
+            rows = conn.execute(
+                f"""
                 SELECT event_time, severity, device_id, interface_id, message
                 FROM events
+                {where}
                 ORDER BY event_time DESC
                 LIMIT ?
                 """,
-                (limit,),
+                params,
             ).fetchall()
             return [dict(row) for row in rows]
 

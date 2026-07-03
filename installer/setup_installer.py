@@ -29,6 +29,7 @@ def main() -> int:
         archive.extractall(install_dir)
 
     write_scripts(install_dir)
+    create_shortcuts(install_dir)
     create_startup_task(install_dir)
     start_monitor(install_dir)
     webbrowser.open(PORTAL_URL)
@@ -101,6 +102,8 @@ def write_scripts(install_dir: Path) -> None:
     start_script = install_dir / "start_monitor.cmd"
     stop_script = install_dir / "stop_monitor.cmd"
     open_script = install_dir / "open_dashboard.cmd"
+    settings_script = install_dir / "open_settings.cmd"
+    restart_script = install_dir / "restart_monitor.cmd"
     collect_script = install_dir / "collect_once.cmd"
     uninstall_script = install_dir / "uninstall.cmd"
 
@@ -109,7 +112,7 @@ def write_scripts(install_dir: Path) -> None:
             f"""\
             @echo off
             cd /d "%~dp0"
-            start "{APP_NAME}" /min "%~dp0HuaweiTrafficMonitor.exe" --data-dir "%~dp0data"
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=(Resolve-Path '%~dp0HuaweiTrafficMonitor.exe').Path; $running=Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -eq $exe }}; if (-not $running) {{ Start-Process -FilePath $exe -ArgumentList @('--data-dir', '%~dp0data') -WindowStyle Minimized }}"
             """
         ),
         encoding="utf-8",
@@ -118,12 +121,24 @@ def write_scripts(install_dir: Path) -> None:
         textwrap.dedent(
             f"""\
             @echo off
-            powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{APP_NAME}*HuaweiTrafficMonitor.exe*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=(Resolve-Path '%~dp0HuaweiTrafficMonitor.exe').Path; Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -eq $exe }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
             """
         ),
         encoding="utf-8",
     )
     open_script.write_text(f"@echo off\r\nstart {PORTAL_URL}\r\n", encoding="utf-8")
+    settings_script.write_text(f"@echo off\r\nstart {SETTINGS_URL}\r\n", encoding="utf-8")
+    restart_script.write_text(
+        textwrap.dedent(
+            """\
+            @echo off
+            call "%~dp0stop_monitor.cmd"
+            timeout /t 2 /nobreak >nul
+            call "%~dp0start_monitor.cmd"
+            """
+        ),
+        encoding="utf-8",
+    )
     collect_script.write_text(
         textwrap.dedent(
             """\
@@ -141,12 +156,57 @@ def write_scripts(install_dir: Path) -> None:
             @echo off
             schtasks /Delete /TN "{TASK_NAME}" /F >nul 2>nul
             call "%~dp0stop_monitor.cmd"
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "$desktop=[Environment]::GetFolderPath('DesktopDirectory'); $start=[Environment]::GetFolderPath('Programs'); Remove-Item -LiteralPath (Join-Path $desktop '华为交换机流量看板.lnk') -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath (Join-Path $desktop '华为交换机对接设置.lnk') -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath (Join-Path $start 'Huawei Traffic Monitor') -Recurse -Force -ErrorAction SilentlyContinue"
+            set /p DELETE_DATA=是否删除配置和历史数据 data 文件夹？输入 YES 删除，直接回车保留：
+            if /I "%DELETE_DATA%"=="YES" (
+              rmdir /s /q "%~dp0data"
+              echo 已删除 data 数据目录。
+            ) else (
+              echo 已保留 data 数据目录。
+            )
             echo 已停止并移除计划任务。程序目录保留在：%~dp0
             pause
             """
         ),
         encoding="utf-8",
     )
+
+
+def create_shortcuts(install_dir: Path) -> None:
+    dashboard_script = install_dir / "open_dashboard.cmd"
+    settings_script = install_dir / "open_settings.cmd"
+    ps_script = textwrap.dedent(
+        f"""
+        $desktop=[Environment]::GetFolderPath('DesktopDirectory')
+        $programs=[Environment]::GetFolderPath('Programs')
+        $folder=Join-Path $programs 'Huawei Traffic Monitor'
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        $shell=New-Object -ComObject WScript.Shell
+        foreach ($item in @(
+            @{{Path=(Join-Path $desktop '华为交换机流量看板.lnk'); Target='{dashboard_script}'; Description='打开华为交换机接口流量监控看板'}},
+            @{{Path=(Join-Path $desktop '华为交换机对接设置.lnk'); Target='{settings_script}'; Description='打开华为交换机 SNMP 对接设置'}},
+            @{{Path=(Join-Path $folder '流量看板.lnk'); Target='{dashboard_script}'; Description='打开华为交换机接口流量监控看板'}},
+            @{{Path=(Join-Path $folder '对接设置.lnk'); Target='{settings_script}'; Description='打开华为交换机 SNMP 对接设置'}},
+            @{{Path=(Join-Path $folder '卸载.lnk'); Target='{install_dir / "uninstall.cmd"}'; Description='卸载华为交换机接口流量监控'}}
+        )) {{
+            $shortcut=$shell.CreateShortcut($item.Path)
+            $shortcut.TargetPath=$item.Target
+            $shortcut.WorkingDirectory='{install_dir}'
+            $shortcut.Description=$item.Description
+            $shortcut.Save()
+        }}
+        """
+    ).strip()
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        print("已创建桌面和开始菜单快捷方式。")
+    else:
+        print("创建快捷方式失败，程序仍可通过安装目录脚本启动。")
+        print(result.stderr.strip() or result.stdout.strip())
 
 
 def create_startup_task(install_dir: Path) -> None:
