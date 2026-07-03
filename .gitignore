@@ -1,0 +1,35 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Runtime data and local device configuration
+data/
+dev_data/
+verify_data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Build outputs
+setup_build/
+setup_dist/
+setup_spec/
+standalone_build/
+standalone_dist/
+standalone_spec/
+dist/
+build/
+*.exe
+*.cab
+*.CAB
+*.zip
+
+# Generated installer payloads
+installer/payload/
+installer/payload_pyinstaller/
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
