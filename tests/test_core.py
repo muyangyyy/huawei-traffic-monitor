@@ -11,6 +11,7 @@ from app.snmp_v2c import decode_response, encode_message, encode_oid, parse_oid
 from app.snmp_v2c import VarBind
 from app.tray import WindowsTrayIcon, is_tray_supported, pixel_for
 from app.web import SETTINGS_HTML, build_stats, merge_saved_communities, safe_config_json, traffic_window
+from installer.setup_installer import build_uninstall_script
 from monitor import build_parser
 
 
@@ -250,6 +251,13 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config["devices"][0]["custom_out_oid"], DEFAULT_CUSTOM_OUT_OID)
             self.assertEqual(loaded.devices[0].custom_in_oid, DEFAULT_CUSTOM_IN_OID)
             self.assertEqual(loaded.devices[0].custom_out_oid, DEFAULT_CUSTOM_OUT_OID)
+
+    def test_uninstall_script_deletes_install_directory(self) -> None:
+        script = build_uninstall_script()
+
+        self.assertIn('call "%~dp0stop_monitor.cmd"', script)
+        self.assertIn("schtasks /Delete", script)
+        self.assertIn('rmdir /s /q "%INSTALL_DIR%"', script)
 
 
 class DatabaseSummaryTests(unittest.TestCase):

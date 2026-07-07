@@ -188,6 +188,38 @@ def write_scripts(install_dir: Path) -> None:
         ),
         encoding="utf-8",
     )
+    uninstall_script.write_text(build_uninstall_script(), encoding="utf-8")
+
+
+def build_uninstall_script() -> str:
+    return textwrap.dedent(
+        f"""\
+        @echo off
+        chcp 65001 >nul
+        setlocal EnableExtensions
+        set "INSTALL_DIR=%~dp0"
+        set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
+        echo 即将卸载华为交换机接口流量监控，并删除安装目录：
+        echo %INSTALL_DIR%
+        set /p CONFIRM=输入 YES 确认卸载并删除安装文件、配置和历史数据：
+        if /I not "%CONFIRM%"=="YES" (
+          echo 已取消卸载。
+          pause
+          exit /b 0
+        )
+        schtasks /Delete /TN "{TASK_NAME}" /F >nul 2>nul
+        call "%~dp0stop_monitor.cmd"
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "$desktop=[Environment]::GetFolderPath('DesktopDirectory'); $start=[Environment]::GetFolderPath('Programs'); Remove-Item -LiteralPath (Join-Path $desktop '华为交换机流量看板.lnk') -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath (Join-Path $desktop '华为交换机对接设置.lnk') -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath (Join-Path $start 'Huawei Traffic Monitor') -Recurse -Force -ErrorAction SilentlyContinue"
+        set "CLEANUP=%TEMP%\\HuaweiTrafficMonitor_uninstall_%RANDOM%.cmd"
+        > "%CLEANUP%" echo @echo off
+        >> "%CLEANUP%" echo timeout /t 2 /nobreak ^>nul
+        >> "%CLEANUP%" echo rmdir /s /q "%INSTALL_DIR%"
+        >> "%CLEANUP%" echo del "%%~f0"
+        echo 已停止服务并移除快捷方式。安装目录将在窗口关闭后删除。
+        start "" /min "%CLEANUP%"
+        exit /b 0
+        """
+    )
 
 
 def create_shortcuts(install_dir: Path) -> None:

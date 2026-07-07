@@ -78,6 +78,32 @@ if not exist "%INSTALL_DIR%\HuaweiTrafficMonitor.exe" (
   echo pause
 ) > "%INSTALL_DIR%\uninstall.cmd"
 
+(
+  echo @echo off
+  echo chcp 65001 ^>nul
+  echo setlocal EnableExtensions
+  echo set "INSTALL_DIR=%%~dp0"
+  echo set "INSTALL_DIR=%%INSTALL_DIR:~0,-1%%"
+  echo echo This will uninstall Huawei Traffic Monitor and delete:
+  echo echo %%INSTALL_DIR%%
+  echo set /p CONFIRM=Type YES to confirm uninstall and delete all installed files/data:
+  echo if /I not "%%CONFIRM%%"=="YES" ^(
+  echo   echo Uninstall canceled.
+  echo   pause
+  echo   exit /b 0
+  echo ^)
+  echo schtasks /Delete /TN "%TASK_NAME%" /F ^>nul 2^>nul
+  echo call "%%~dp0stop_monitor.cmd"
+  echo set "CLEANUP=%%TEMP%%\HuaweiTrafficMonitor_uninstall_%%RANDOM%%.cmd"
+  echo ^> "%%CLEANUP%%" echo @echo off
+  echo ^>^> "%%CLEANUP%%" echo timeout /t 2 /nobreak ^^^>nul
+  echo ^>^> "%%CLEANUP%%" echo rmdir /s /q "%%INSTALL_DIR%%"
+  echo ^>^> "%%CLEANUP%%" echo del "%%%%~f0"
+  echo echo Service stopped. Install directory will be deleted after this window closes.
+  echo start "" /min "%%CLEANUP%%"
+  echo exit /b 0
+) > "%INSTALL_DIR%\uninstall.cmd"
+
 schtasks /Create /TN "%TASK_NAME%" /SC ONLOGON /TR "\"%INSTALL_DIR%\start_monitor.cmd\"" /F >nul
 if errorlevel 1 (
   echo 创建开机登录启动任务失败，但程序文件已安装到：%INSTALL_DIR%
