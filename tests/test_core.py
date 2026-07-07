@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.database import InterfaceSample, MonitorDatabase, calculate_delta
 from app.collector import IF_ALIAS, IF_NAME, IF_OPER_STATUS, snmp_custom_dual_samples, snmp_custom_single_samples, snmp_interface_catalog
-from app.config import DEFAULT_CONFIG, DeviceConfig, load_config
+from app.config import DEFAULT_CONFIG, DEFAULT_CUSTOM_IN_OID, DEFAULT_CUSTOM_OUT_OID, DeviceConfig, load_config, save_config_json
 from app.snmp_v2c import decode_response, encode_message, encode_oid, parse_oid
 from app.snmp_v2c import VarBind
 from app.tray import WindowsTrayIcon, is_tray_supported, pixel_for
@@ -217,6 +217,39 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(merged["devices"][0]["community"], "secret")
         self.assertEqual(merged["devices"][1]["community"], "public")
+
+    def test_custom_dual_oids_default_when_blank(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            config = {
+                "listen_host": "127.0.0.1",
+                "listen_port": 8088,
+                "sample_interval_seconds": 30,
+                "retention_days": 400,
+                "snmp_timeout_seconds": 2.0,
+                "snmp_retries": 1,
+                "mock_mode": False,
+                "devices": [
+                    {
+                        "id": "d1",
+                        "name": "core",
+                        "host": "192.0.2.1",
+                        "snmp_version": "2c",
+                        "community": "public",
+                        "oid_profile": "custom_dual",
+                        "custom_in_oid": "",
+                        "custom_out_oid": "",
+                    }
+                ],
+            }
+
+            save_config_json(data_dir, config)
+            loaded = load_config(data_dir)
+
+            self.assertEqual(config["devices"][0]["custom_in_oid"], DEFAULT_CUSTOM_IN_OID)
+            self.assertEqual(config["devices"][0]["custom_out_oid"], DEFAULT_CUSTOM_OUT_OID)
+            self.assertEqual(loaded.devices[0].custom_in_oid, DEFAULT_CUSTOM_IN_OID)
+            self.assertEqual(loaded.devices[0].custom_out_oid, DEFAULT_CUSTOM_OUT_OID)
 
 
 class DatabaseSummaryTests(unittest.TestCase):

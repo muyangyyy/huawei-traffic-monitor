@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Any
 
 
+DEFAULT_CUSTOM_IN_OID = ".1.3.6.1.2.1.31.1.1.1.6.45"
+DEFAULT_CUSTOM_OUT_OID = ".1.3.6.1.2.1.31.1.1.1.10.45"
+
 DEFAULT_CONFIG = {
     "listen_host": "127.0.0.1",
     "listen_port": 8088,
@@ -22,8 +25,8 @@ DEFAULT_CONFIG = {
             "oid_profile": "if_mib_64",
             "custom_oid": "",
             "custom_direction": "in",
-            "custom_in_oid": "",
-            "custom_out_oid": "",
+            "custom_in_oid": DEFAULT_CUSTOM_IN_OID,
+            "custom_out_oid": DEFAULT_CUSTOM_OUT_OID,
             "monitor_interfaces": [],
             "enabled": True,
             "mock": True,
@@ -42,8 +45,8 @@ class DeviceConfig:
     oid_profile: str = "if_mib_64"
     custom_oid: str = ""
     custom_direction: str = "in"
-    custom_in_oid: str = ""
-    custom_out_oid: str = ""
+    custom_in_oid: str = DEFAULT_CUSTOM_IN_OID
+    custom_out_oid: str = DEFAULT_CUSTOM_OUT_OID
     monitor_interfaces: tuple[str, ...] = ()
     port: int = 161
     enabled: bool = True
@@ -110,10 +113,13 @@ def validate_config_json(value: dict[str, Any]) -> None:
         custom_oid = str(device.get("custom_oid", "")).strip()
         if profile == "custom_single" and not is_oid_text(custom_oid):
             raise ValueError("custom_single requires a valid SNMP OID")
-        custom_in_oid = str(device.get("custom_in_oid", "")).strip()
-        custom_out_oid = str(device.get("custom_out_oid", "")).strip()
-        if profile == "custom_dual" and (not is_oid_text(custom_in_oid) or not is_oid_text(custom_out_oid)):
-            raise ValueError("custom_dual requires valid in and out SNMP OIDs")
+        custom_in_oid = str(device.get("custom_in_oid") or DEFAULT_CUSTOM_IN_OID).strip()
+        custom_out_oid = str(device.get("custom_out_oid") or DEFAULT_CUSTOM_OUT_OID).strip()
+        if profile == "custom_dual":
+            device["custom_in_oid"] = custom_in_oid
+            device["custom_out_oid"] = custom_out_oid
+            if not is_oid_text(custom_in_oid) or not is_oid_text(custom_out_oid):
+                raise ValueError("custom_dual requires valid in and out SNMP OIDs")
         monitor_interfaces = device.get("monitor_interfaces", [])
         if monitor_interfaces is None:
             device["monitor_interfaces"] = []
@@ -143,17 +149,18 @@ def load_config(data_dir: Path) -> MonitorConfig:
 def _load_device(item: dict[str, Any]) -> DeviceConfig:
     host = str(item.get("host") or item.get("mgmt_ip") or "127.0.0.1")
     device_id = str(item.get("id") or host.replace(".", "-"))
+    oid_profile = str(item.get("oid_profile", "if_mib_64"))
     return DeviceConfig(
         id=device_id,
         name=str(item.get("name") or device_id),
         host=host,
         snmp_version=str(item.get("snmp_version", "2c")).lower(),
         community=str(item.get("community", "public")),
-        oid_profile=str(item.get("oid_profile", "if_mib_64")),
+        oid_profile=oid_profile,
         custom_oid=str(item.get("custom_oid", "")).strip(),
         custom_direction=str(item.get("custom_direction", "in")).lower(),
-        custom_in_oid=str(item.get("custom_in_oid", "")).strip(),
-        custom_out_oid=str(item.get("custom_out_oid", "")).strip(),
+        custom_in_oid=str(item.get("custom_in_oid") or (DEFAULT_CUSTOM_IN_OID if oid_profile == "custom_dual" else "")).strip(),
+        custom_out_oid=str(item.get("custom_out_oid") or (DEFAULT_CUSTOM_OUT_OID if oid_profile == "custom_dual" else "")).strip(),
         monitor_interfaces=tuple(str(value).strip() for value in item.get("monitor_interfaces", []) if str(value).strip()),
         port=int(item.get("port", 161)),
         enabled=bool(item.get("enabled", True)),
