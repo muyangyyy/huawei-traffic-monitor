@@ -9,7 +9,7 @@ from app.collector import IF_ALIAS, IF_NAME, IF_OPER_STATUS, snmp_custom_dual_sa
 from app.config import DEFAULT_CONFIG, DeviceConfig, load_config
 from app.snmp_v2c import decode_response, encode_message, encode_oid, parse_oid
 from app.snmp_v2c import VarBind
-from app.web import build_stats, merge_saved_communities, safe_config_json, traffic_window
+from app.web import SETTINGS_HTML, build_stats, merge_saved_communities, safe_config_json, traffic_window
 
 
 UTC = timezone.utc
@@ -93,6 +93,11 @@ class StatsTests(unittest.TestCase):
         )
         self.assertEqual(start, datetime(2026, 7, 1, 8, 30, tzinfo=UTC))
         self.assertEqual(end, datetime(2026, 7, 2, 8, 30, tzinfo=UTC))
+
+    def test_settings_save_has_visible_status_feedback(self) -> None:
+        self.assertIn('id="status" class="status" role="status"', SETTINGS_HTML)
+        self.assertIn("正在保存配置", SETTINGS_HTML)
+        self.assertIn("保存时间", SETTINGS_HTML)
 
 
 class CollectorTests(unittest.TestCase):
