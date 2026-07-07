@@ -1,6 +1,8 @@
 import argparse
 import builtins
+import os
 import signal
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -12,6 +14,9 @@ from app.tray import WindowsTrayIcon, is_tray_supported
 from app.web import MonitorHttpServer
 
 
+BACKGROUND_ENV = "HUAWEI_TRAFFIC_MONITOR_BACKGROUND"
+
+
 def print(*args: object, **kwargs: object) -> None:
     if sys.stdout is not None:
         builtins.print(*args, **kwargs)
@@ -19,6 +24,9 @@ def print(*args: object, **kwargs: object) -> None:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if should_launch_background(args):
+        if launch_background_process():
+            return 0
 
     if getattr(sys, "frozen", False):
         base_dir = Path(sys.executable).resolve().parent
@@ -82,7 +90,62 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir", default="data", help="配置和数据库目录")
     parser.add_argument("--collect-once", action="store_true", help="只执行一次采集后退出")
     parser.add_argument("--no-tray", action="store_true", help="不显示 Windows 托盘图标")
+    parser.add_argument("--background-child", action="store_true", help=argparse.SUPPRESS)
     return parser
+
+
+def should_launch_background(args: argparse.Namespace) -> bool:
+    return (
+        sys.platform == "win32"
+        and not getattr(sys, "frozen", False)
+        and is_tray_supported()
+        and not args.collect_once
+        and not args.no_tray
+        and not args.background_child
+        and os.environ.get(BACKGROUND_ENV) != "1"
+        and sys.stdout is not None
+    )
+
+
+def launch_background_process() -> bool:
+    script = Path(__file__).resolve()
+    executable = background_python_executable()
+    command = [executable, str(script), *sys.argv[1:], "--background-child"]
+    env = os.environ.copy()
+    env[BACKGROUND_ENV] = "1"
+    creationflags = 0
+    for flag in ("CREATE_NO_WINDOW", "CREATE_NEW_PROCESS_GROUP", "DETACHED_PROCESS"):
+        creationflags |= getattr(subprocess, flag, 0)
+    try:
+        subprocess.Popen(
+            command,
+            cwd=str(script.parent),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=creationflags,
+        )
+        return True
+    except OSError as exc:
+        print(f"后台启动失败，继续在当前窗口运行：{exc}")
+        return False
+
+
+def background_python_executable() -> str:
+    candidates: list[Path] = []
+    current = Path(sys.executable)
+    if current.name.lower() == "python.exe":
+        candidates.append(current.with_name("pythonw.exe"))
+    base_executable = getattr(sys, "_base_executable", "")
+    if base_executable:
+        candidates.append(Path(base_executable).with_name("pythonw.exe"))
+    candidates.append(Path(sys.base_prefix) / "pythonw.exe")
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
 
 
 if __name__ == "__main__":

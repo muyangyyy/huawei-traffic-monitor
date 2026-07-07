@@ -105,6 +105,10 @@ class StatsTests(unittest.TestCase):
         args = build_parser().parse_args(["--no-tray"])
         self.assertTrue(args.no_tray)
 
+    def test_monitor_accepts_background_child_option(self) -> None:
+        args = build_parser().parse_args(["--background-child"])
+        self.assertTrue(args.background_child)
+
     def test_tray_module_constructs_on_supported_platform(self) -> None:
         if not is_tray_supported():
             self.skipTest("Windows tray icon is only supported on Windows")
