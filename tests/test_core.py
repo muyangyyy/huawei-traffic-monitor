@@ -117,8 +117,8 @@ class StatsTests(unittest.TestCase):
 
     def test_tray_icon_pixels_use_project_specific_shape(self) -> None:
         self.assertEqual(pixel_for(32, 0, 0), (0, 0, 0, 0))
-        self.assertEqual(pixel_for(32, 10, 18), (55, 210, 149, 255))
-        self.assertEqual(pixel_for(32, 17, 6), (75, 154, 255, 255))
+        self.assertEqual(pixel_for(32, 16, 8), (207, 10, 44, 255))
+        self.assertEqual(pixel_for(32, 16, 17), (255, 255, 255, 255))
 
 
 class CollectorTests(unittest.TestCase):
