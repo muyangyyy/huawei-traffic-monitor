@@ -1,3 +1,4 @@
+import builtins
 import os
 import subprocess
 import sys
@@ -13,6 +14,11 @@ APP_NAME = "HuaweiTrafficMonitor"
 TASK_NAME = "HuaweiTrafficMonitor"
 PORTAL_URL = "http://127.0.0.1:8088/"
 SETTINGS_URL = "http://127.0.0.1:8088/settings"
+
+
+def print(*args: object, **kwargs: object) -> None:
+    if sys.stdout is not None:
+        builtins.print(*args, **kwargs)
 
 
 def main() -> int:
@@ -100,6 +106,7 @@ def resource_path(name: str) -> Path:
 
 def write_scripts(install_dir: Path) -> None:
     start_script = install_dir / "start_monitor.cmd"
+    start_hidden_script = install_dir / "start_monitor_hidden.vbs"
     stop_script = install_dir / "stop_monitor.cmd"
     open_script = install_dir / "open_dashboard.cmd"
     settings_script = install_dir / "open_settings.cmd"
@@ -112,7 +119,18 @@ def write_scripts(install_dir: Path) -> None:
             f"""\
             @echo off
             cd /d "%~dp0"
-            powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=(Resolve-Path '%~dp0HuaweiTrafficMonitor.exe').Path; $running=Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -eq $exe }}; if (-not $running) {{ Start-Process -FilePath $exe -ArgumentList @('--data-dir', '%~dp0data') -WindowStyle Minimized }}"
+            powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$exe=(Resolve-Path '%~dp0HuaweiTrafficMonitor.exe').Path; $running=Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -eq $exe }}; if (-not $running) {{ Start-Process -FilePath $exe -ArgumentList @('--data-dir', '%~dp0data') -WindowStyle Hidden }}"
+            """
+        ),
+        encoding="utf-8",
+    )
+    start_hidden_script.write_text(
+        textwrap.dedent(
+            """\
+            Set shell = CreateObject("WScript.Shell")
+            Set fso = CreateObject("Scripting.FileSystemObject")
+            base = fso.GetParentFolderName(WScript.ScriptFullName)
+            shell.Run Chr(34) & base & "\\start_monitor.cmd" & Chr(34), 0, False
             """
         ),
         encoding="utf-8",
@@ -210,7 +228,7 @@ def create_shortcuts(install_dir: Path) -> None:
 
 
 def create_startup_task(install_dir: Path) -> None:
-    start_script = install_dir / "start_monitor.cmd"
+    start_script = install_dir / "start_monitor_hidden.vbs"
     result = subprocess.run(
         [
             "schtasks",
@@ -220,7 +238,7 @@ def create_startup_task(install_dir: Path) -> None:
             "/SC",
             "ONLOGON",
             "/TR",
-            str(start_script),
+            f'wscript.exe "{start_script}"',
             "/F",
         ],
         capture_output=True,
@@ -235,9 +253,8 @@ def create_startup_task(install_dir: Path) -> None:
 
 def start_monitor(install_dir: Path) -> None:
     subprocess.Popen(
-        [str(install_dir / "start_monitor.cmd")],
+        ["wscript.exe", str(install_dir / "start_monitor_hidden.vbs")],
         cwd=str(install_dir),
-        shell=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 

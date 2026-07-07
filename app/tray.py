@@ -1,7 +1,8 @@
+import math
 import sys
 import threading
 import webbrowser
-from ctypes import POINTER, WINFUNCTYPE, Structure, byref, c_int, c_void_p, c_ssize_t, sizeof, windll
+from ctypes import POINTER, WINFUNCTYPE, Structure, byref, c_int, c_ubyte, c_void_p, c_ssize_t, sizeof, windll
 from ctypes import wintypes
 from typing import Callable
 
@@ -28,6 +29,18 @@ def configure_win32_api() -> None:
         c_void_p,
     ]
     user32.CreateWindowExW.restype = wintypes.HWND
+    user32.CreateIcon.argtypes = [
+        wintypes.HINSTANCE,
+        c_int,
+        c_int,
+        c_ubyte,
+        c_ubyte,
+        POINTER(c_ubyte),
+        POINTER(c_ubyte),
+    ]
+    user32.CreateIcon.restype = wintypes.HICON
+    user32.DestroyIcon.argtypes = [wintypes.HICON]
+    user32.DestroyIcon.restype = wintypes.BOOL
     user32.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT, c_int, c_int, c_int, wintypes.HWND, c_void_p]
     user32.TrackPopupMenu.restype = wintypes.UINT
     shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, POINTER(NOTIFYICONDATAW)]
@@ -43,6 +56,7 @@ class WindowsTrayIcon:
         self.thread: threading.Thread | None = None
         self.ready = threading.Event()
         self.hwnd: int | None = None
+        self.hicon: int | None = None
         self._wndproc_ref = None
 
     def start(self) -> bool:
@@ -76,6 +90,7 @@ class WindowsTrayIcon:
 
         hwnd = windll.user32.CreateWindowExW(0, class_name, self.title, 0, 0, 0, 0, 0, None, None, hinstance, None)
         self.hwnd = hwnd
+        self.hicon = create_monitor_icon()
         self._add_icon(hwnd)
         self.ready.set()
 
@@ -108,6 +123,9 @@ class WindowsTrayIcon:
             return 0
         if msg == WM_DESTROY:
             self._delete_icon(hwnd)
+            if self.hicon:
+                windll.user32.DestroyIcon(self.hicon)
+                self.hicon = None
             windll.user32.PostQuitMessage(0)
             return 0
         return windll.user32.DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -141,9 +159,64 @@ class WindowsTrayIcon:
         data.uID = 1
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         data.uCallbackMessage = WM_TRAYICON
-        data.hIcon = windll.user32.LoadIconW(None, IDI_APPLICATION)
+        data.hIcon = self.hicon or windll.user32.LoadIconW(None, IDI_APPLICATION)
         data.szTip = self.title[:127]
         return data
+
+
+def create_monitor_icon(size: int = 32) -> int:
+    row_mask_bytes = ((size + 15) // 16) * 2
+    and_mask = (c_ubyte * (row_mask_bytes * size))()
+    xor_bits = (c_ubyte * (size * size * 4))()
+    pixels = [[pixel_for(size, x, y) for x in range(size)] for y in range(size)]
+
+    for y in range(size):
+        source_y = size - 1 - y
+        for x in range(size):
+            r, g, b, alpha = pixels[source_y][x]
+            offset = (y * size + x) * 4
+            xor_bits[offset] = b
+            xor_bits[offset + 1] = g
+            xor_bits[offset + 2] = r
+            xor_bits[offset + 3] = alpha
+            if alpha == 0:
+                and_mask[y * row_mask_bytes + x // 8] |= 0x80 >> (x % 8)
+
+    return windll.user32.CreateIcon(None, size, size, 1, 32, and_mask, xor_bits)
+
+
+def pixel_for(size: int, x: int, y: int) -> tuple[int, int, int, int]:
+    cx = cy = (size - 1) / 2
+    radius = size * 0.43
+    if math.hypot(x - cx, y - cy) > radius:
+        return (0, 0, 0, 0)
+
+    bolt = ((18, 5), (10, 16), (15, 16), (12, 27), (24, 13), (18, 13))
+    if point_in_polygon(x + 0.5, y + 0.5, bolt):
+        return (38, 226, 226, 255) if x < 17 else (75, 154, 255, 255)
+
+    port_ranges = ((9, 11), (14, 16), (19, 21))
+    if 17 <= y <= 19 and any(start <= x <= end for start, end in port_ranges):
+        return (55, 210, 149, 255)
+
+    if 8 <= y <= 21 and 6 <= x <= 25:
+        edge = x in (6, 25) or y in (8, 21)
+        return (234, 179, 45, 255) if edge else (34, 96, 148, 255)
+
+    return (21, 35, 64, 255)
+
+
+def point_in_polygon(x: float, y: float, points: tuple[tuple[int, int], ...]) -> bool:
+    inside = False
+    previous_x, previous_y = points[-1]
+    for current_x, current_y in points:
+        crosses = (current_y > y) != (previous_y > y)
+        if crosses:
+            slope_x = (previous_x - current_x) * (y - current_y) / (previous_y - current_y) + current_x
+            if x < slope_x:
+                inside = not inside
+        previous_x, previous_y = current_x, current_y
+    return inside
 
 
 def is_tray_supported() -> bool:

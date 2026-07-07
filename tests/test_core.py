@@ -9,7 +9,7 @@ from app.collector import IF_ALIAS, IF_NAME, IF_OPER_STATUS, snmp_custom_dual_sa
 from app.config import DEFAULT_CONFIG, DeviceConfig, load_config
 from app.snmp_v2c import decode_response, encode_message, encode_oid, parse_oid
 from app.snmp_v2c import VarBind
-from app.tray import WindowsTrayIcon, is_tray_supported
+from app.tray import WindowsTrayIcon, is_tray_supported, pixel_for
 from app.web import SETTINGS_HTML, build_stats, merge_saved_communities, safe_config_json, traffic_window
 from monitor import build_parser
 
@@ -110,6 +110,11 @@ class StatsTests(unittest.TestCase):
             self.skipTest("Windows tray icon is only supported on Windows")
         tray = WindowsTrayIcon("test", "http://127.0.0.1/", "http://127.0.0.1/settings", lambda: None)
         self.assertEqual(tray.title, "test")
+
+    def test_tray_icon_pixels_use_project_specific_shape(self) -> None:
+        self.assertEqual(pixel_for(32, 0, 0), (0, 0, 0, 0))
+        self.assertEqual(pixel_for(32, 10, 18), (55, 210, 149, 255))
+        self.assertEqual(pixel_for(32, 17, 6), (75, 154, 255, 255))
 
 
 class CollectorTests(unittest.TestCase):

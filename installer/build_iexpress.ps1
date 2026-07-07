@@ -27,8 +27,32 @@ $standaloneDist = Join-Path $root "standalone_dist"
 $standaloneWork = Join-Path $root "standalone_build"
 $standaloneSpec = Join-Path $root "standalone_spec"
 $standaloneExe = Join-Path $standaloneDist "HuaweiTrafficMonitor.exe"
-$bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-$pythonForBuild = if (Test-Path $bundledPython) { $bundledPython } else { "python" }
+function Resolve-PythonWithPyInstaller {
+    $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+    $candidates = @("python", "py", $bundledPython)
+    foreach ($candidate in $candidates) {
+        if ($candidate -eq $bundledPython -and -not (Test-Path $candidate)) {
+            continue
+        }
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $result = & $candidate -m PyInstaller --version 2>$null
+            $exitCode = $LASTEXITCODE
+        } catch {
+            $result = $null
+            $exitCode = 1
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($exitCode -eq 0 -and $result) {
+            return $candidate
+        }
+    }
+    throw "PyInstaller is required. Install it with: python -m pip install pyinstaller"
+}
+
+$pythonForBuild = Resolve-PythonWithPyInstaller
 
 if (Test-Path $standaloneDist) {
     Remove-Item -LiteralPath $standaloneDist -Recurse -Force
@@ -43,6 +67,7 @@ if (Test-Path $standaloneSpec) {
 & $pythonForBuild -m PyInstaller `
     --clean `
     --onefile `
+    --windowed `
     --name HuaweiTrafficMonitor `
     --distpath $standaloneDist `
     --workpath $standaloneWork `

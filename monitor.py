@@ -1,4 +1,5 @@
 import argparse
+import builtins
 import signal
 import sys
 import threading
@@ -9,6 +10,11 @@ from app.config import load_config
 from app.database import MonitorDatabase
 from app.tray import WindowsTrayIcon, is_tray_supported
 from app.web import MonitorHttpServer
+
+
+def print(*args: object, **kwargs: object) -> None:
+    if sys.stdout is not None:
+        builtins.print(*args, **kwargs)
 
 
 def main() -> int:

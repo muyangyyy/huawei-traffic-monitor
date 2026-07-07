@@ -18,8 +18,32 @@ $setupWork = Join-Path $root "setup_build"
 $setupSpec = Join-Path $root "setup_spec"
 $standaloneExe = Join-Path $standaloneDist "HuaweiTrafficMonitor.exe"
 
-$bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-$pythonForBuild = if (Test-Path $bundledPython) { $bundledPython } else { "python" }
+function Resolve-PythonWithPyInstaller {
+    $bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+    $candidates = @("python", "py", $bundledPython)
+    foreach ($candidate in $candidates) {
+        if ($candidate -eq $bundledPython -and -not (Test-Path $candidate)) {
+            continue
+        }
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $result = & $candidate -m PyInstaller --version 2>$null
+            $exitCode = $LASTEXITCODE
+        } catch {
+            $result = $null
+            $exitCode = 1
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+        if ($exitCode -eq 0 -and $result) {
+            return $candidate
+        }
+    }
+    throw "PyInstaller is required. Install it with: python -m pip install pyinstaller"
+}
+
+$pythonForBuild = Resolve-PythonWithPyInstaller
 
 foreach ($path in @($payload, $standaloneDist, $standaloneWork, $standaloneSpec, $setupDist, $setupWork, $setupSpec)) {
     if (Test-Path $path) {
@@ -35,6 +59,7 @@ if (Test-Path $setupExe) {
 & $pythonForBuild -m PyInstaller `
     --clean `
     --onefile `
+    --windowed `
     --name HuaweiTrafficMonitor `
     --distpath $standaloneDist `
     --workpath $standaloneWork `
@@ -58,6 +83,7 @@ Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $zipPath -Force
 & $pythonForBuild -m PyInstaller `
     --clean `
     --onefile `
+    --windowed `
     --name HuaweiTrafficMonitorSetup `
     --add-data "$zipPath;." `
     --distpath $setupDist `
