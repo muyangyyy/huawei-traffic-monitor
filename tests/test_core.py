@@ -9,7 +9,9 @@ from app.collector import IF_ALIAS, IF_NAME, IF_OPER_STATUS, snmp_custom_dual_sa
 from app.config import DEFAULT_CONFIG, DeviceConfig, load_config
 from app.snmp_v2c import decode_response, encode_message, encode_oid, parse_oid
 from app.snmp_v2c import VarBind
+from app.tray import WindowsTrayIcon, is_tray_supported
 from app.web import SETTINGS_HTML, build_stats, merge_saved_communities, safe_config_json, traffic_window
+from monitor import build_parser
 
 
 UTC = timezone.utc
@@ -98,6 +100,16 @@ class StatsTests(unittest.TestCase):
         self.assertIn('id="status" class="status" role="status"', SETTINGS_HTML)
         self.assertIn("正在保存配置", SETTINGS_HTML)
         self.assertIn("保存时间", SETTINGS_HTML)
+
+    def test_monitor_accepts_no_tray_option(self) -> None:
+        args = build_parser().parse_args(["--no-tray"])
+        self.assertTrue(args.no_tray)
+
+    def test_tray_module_constructs_on_supported_platform(self) -> None:
+        if not is_tray_supported():
+            self.skipTest("Windows tray icon is only supported on Windows")
+        tray = WindowsTrayIcon("test", "http://127.0.0.1/", "http://127.0.0.1/settings", lambda: None)
+        self.assertEqual(tray.title, "test")
 
 
 class CollectorTests(unittest.TestCase):
